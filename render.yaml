@@ -1,21 +1,14 @@
 services:
+  - type: web
+    name: nee-brain-v2
+    env: python
+    region: singapore
+    plan: free
+    
+    buildCommand: "mkdir -p Nee_V2_ONNX && wget --no-check-certificate 'https://drive.google.com/uc?export=download&id=1HYwzmKIMoK0Zjyjk-Y847lEYLyl4wjea' -O Nee_V2_ONNX/model.onnx"
 
-- type: web
+    startCommand: "uvicorn server:app --host 0.0.0.0 --port 10000"
 
-name: nee-brain-v2
-
-env: python
-
-region: singapore
-
-plan: free
-
-buildCommand: ""
-
-startCommand: "uvicorn server:app --host 0.0.0.0 --port 10000"
-
-envVars:
-
-- key: PORT
-
-value: "10000"
+    envVars:
+      - key: PORT
+        value: '10000'
