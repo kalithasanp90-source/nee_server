@@ -4,11 +4,14 @@ services:
     env: python
     region: singapore
     plan: free
-    
-    buildCommand: "mkdir -p Nee_V2_ONNX && wget --no-check-certificate 'https://drive.google.com/uc?export=download&id=1HYwzmKIMoK0Zjyjk-Y847lEYLyl4wjea' -O Nee_V2_ONNX/model.onnx"
 
-    startCommand: "uvicorn server:app --host 0.0.0.0 --port 10000"
+    buildCommand: |
+      pip install requests
+      python3 download_tokenizer.py
+      pip install -r requirements.txt
+
+    startCommand: "uvicorn server:app --host 0.0.0.0 --port $PORT"
 
     envVars:
       - key: PORT
-        value: '10000'
+        value: "10000"
