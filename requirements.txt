@@ -1,0 +1,11 @@
+fastapi
+
+uvicorn
+
+onnxruntime
+
+transformers==4.35.2
+
+numpy
+
+torch

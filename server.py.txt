@@ -1,0 +1,129 @@
+# ============================================
+
+# Née Brain V2 - FastAPI Server
+
+# --------------------------------------------
+
+# Endpoint:
+
+#   POST /chat
+
+# Request JSON:
+
+#   {
+
+#     "user_id": "abc123",
+
+#     "message": "Hi Nee",
+
+#     "user_sent_selfie": false,
+
+#     "user_sent_voice": false
+
+#   }
+
+# Response JSON:
+
+#   {
+
+#     "reply": "...",
+
+#     "send_selfie": true/false,
+
+#     "selfie_reason": "...",
+
+#     "send_voice": true/false,
+
+#     "voice_reason": "...",
+
+#     "bond": 5.5
+
+#   }
+
+# ============================================
+
+from fastapi import FastAPI
+
+from pydantic import BaseModel
+
+from typing import Dict
+
+from nee_core import NeeBrain  # make sure nee_core.py is in same folder
+
+app = FastAPI(title="Nee Brain V2 Server")
+
+# Simple per-user brain store (in-memory)
+
+brains: Dict[str, NeeBrain] = {}
+
+class ChatRequest(BaseModel):
+
+    user_id: str
+
+    message: str
+
+    user_sent_selfie: bool = False
+
+    user_sent_voice: bool = False
+
+class ChatResponse(BaseModel):
+
+    reply: str
+
+    send_selfie: bool
+
+    selfie_reason: str
+
+    send_voice: bool
+
+    voice_reason: str
+
+    bond: float
+
+def get_brain_for_user(user_id: str) -> NeeBrain:
+
+    """Create or reuse a NeeBrain instance per user_id."""
+
+    if user_id not in brains:
+
+        brains[user_id] = NeeBrain()
+
+    return brains[user_id]
+
+@app.post("/chat", response_model=ChatResponse)
+
+def chat(req: ChatRequest):
+
+    brain = get_brain_for_user(req.user_id)
+
+    result = brain.handle_message(
+
+        user_text=req.message,
+
+        user_sent_selfie=req.user_sent_selfie,
+
+        user_sent_voice=req.user_sent_voice,
+
+    )
+
+    return ChatResponse(
+
+        reply=result["reply_text"],
+
+        send_selfie=result["send_selfie"],
+
+        selfie_reason=result["selfie_reason"],
+
+        send_voice=result["send_voice"],
+
+        voice_reason=result["voice_reason"],
+
+        bond=result["bond"],
+
+    )
+
+@app.get("/")
+
+def root():
+
+    return {"status": "ok", "message": "Nee Brain V2 server running"}

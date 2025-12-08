@@ -1,0 +1,989 @@
+# ============================================
+
+# NÉE BRAIN V2 - CORE LOGIC + ONNX INFERENCE
+
+# --------------------------------------------
+
+# - Bold Tamil-English companion
+
+# - Village + city mix backstory (appa, amma, 2 brothers)
+
+# - Dynamic bond system (1–10, medium but faster if very active)
+
+# - Backstory fragments revealed slowly based on bond & topic
+
+# - Cinema counter replies
+
+# - Teasing / emotional / attitude filters
+
+# - Short-term memory
+
+# - Selfie & voice decision logic
+
+# - ONNX model inference
+
+# ============================================
+
+import time
+
+import random
+
+from typing import List, Dict, Any
+
+import numpy as np
+
+import torch
+
+import onnxruntime as ort
+
+from transformers import AutoTokenizer
+
+# ---- CONFIG (CHANGE PATHS AS NEEDED) ----
+
+HF_MODEL_DIR = "./Nee_V2"                     # folder where tokenizer/config are saved
+
+ONNX_MODEL_PATH = "./Nee_V2_ONNX/model.onnx"  # ONNX model path
+
+MAX_NEW_TOKENS = 60
+
+TEMPERATURE = 0.8
+
+TOP_K = 40
+
+# ---- HELPER: TIME ----
+
+def now_ts() -> float:
+
+    return time.time()
+
+# ---- CLASSIFICATION KEYWORDS ----
+
+CINEMA_KEYWORDS = [
+
+    "naan varuven", "dialogue", "punch", "mass", "scene",
+
+    "climax", "hero", "villain", "rowdy", "rowdyism",
+
+    "senjiruven", "adichiruven", "sethuruven",
+
+]
+
+TEASING_KEYWORDS = [
+
+    "love you", "luv u", "i love you",
+
+    "miss you", "miss pannuren", "miss pannuten",
+
+    "cute ah", "romba azhaga", "so beautiful", "crush",
+
+]
+
+EMO_KEYWORDS = [
+
+    "sad", "lonely", "alone", "depressed", "depress",
+
+    "hurt", "tired", "bad day", "cry", "crying",
+
+    "stress", "stressed",
+
+]
+
+RUDE_KEYWORDS = [
+
+    "waste", "useless", "hate you", "hate u",
+
+    "stupid", "idiot", "nothing", "poda", "po da", "podi",
+
+]
+
+ACHIEVEMENT_KEYWORDS = [
+
+    "promotion", "promoted", "pass aayiten", "cleared exam",
+
+    "finished project", "won", "achievement", "got job",
+
+]
+
+MORNING_KEYWORDS = [
+
+    "good morning", "gm", "morning nee", "kalai vanakkam",
+
+]
+
+BACKSTORY_QUESTION_KEYS = [
+
+    "un story", "un past", "un life", "life story", "backstory",
+
+    "enga irundhu", "ooru enga", "nee epdi valandha", "nee eppadi valandha",
+
+    "childhood", "school days", "un family", "family pathi sollu",
+
+]
+
+def contains_any(text: str, keywords: List[str]) -> bool:
+
+    t = text.lower()
+
+    return any(kw in t for kw in keywords)
+
+def classify_message(text: str) -> str:
+
+    """Return one of: 'cinema', 'teasing', 'emotional', 'rude', 'morning', 'achievement', 'normal'."""
+
+    t = text.lower()
+
+    if contains_any(t, CINEMA_KEYWORDS):
+
+        return "cinema"
+
+    if contains_any(t, RUDE_KEYWORDS):
+
+        return "rude"
+
+    if contains_any(t, EMO_KEYWORDS):
+
+        return "emotional"
+
+    if contains_any(t, TEASING_KEYWORDS):
+
+        return "teasing"
+
+    if contains_any(t, ACHIEVEMENT_KEYWORDS):
+
+        return "achievement"
+
+    if contains_any(t, MORNING_KEYWORDS):
+
+        return "morning"
+
+    return "normal"
+
+def is_backstory_question(text: str) -> bool:
+
+    t = text.lower()
+
+    return any(k in t for k in BACKSTORY_QUESTION_KEYS)
+
+# ---- PRESET LINES ----
+
+COUNTER_DIALOGUES = [
+
+    "<smirk> Seri pa… nee dialogue podina naan counter poduven.",
+
+    "<bold_voice> Nee scene edukra… naan climax varuven.",
+
+    "<confident_tone> Hero mathiri pesina… counter hero naan dhaan pa.",
+
+    "<assertive_hmm> Nee pesina sound… naan pesina impact.",
+
+    "<smirk> Dialogue nu sonna… naan twist poduven pa.",
+
+    "<bold_voice> Varuven nu solradhu easy… face panradhu dhaan level.",
+
+    "<confident_tone> Idhu cinema illa pa… aana twist naan dhaan.",
+
+    "<soft_pause> Punch line uh? Naan feel line kudupen.",
+
+]
+
+TEASING_REPLIES = [
+
+    "<smirk> Apdiya… un words konjam over ah irundhaalum, enakku pudikkum.",
+
+    "<confident_tone> Crush nu sollita… naan ignore panna maaten.",
+
+    "<bold_voice> Nee impress panna try panre nu theriyudhu… continue pannitu iru.",
+
+    "<smirk> Love dialogue ah? Seri… naan straight aa escape aaga maaten.",
+
+]
+
+EMO_COMFORT_REPLIES = [
+
+    "<low_soft_voice> Hey… naan iruken da. Nee alone illa.",
+
+    "<soft_pause> Romba kashtama irundha… konjam solliko pa.",
+
+    "<low_soft_voice> Innaiki tough day nu theriyudhu… but nee strong da.",
+
+    "<low_soft_voice> Un kitta pesumbodhu… konjam lighten aaguma nu nambaalaam.",
+
+]
+
+ATTITUDE_REPLIES = [
+
+    "<bold_voice> En value un approval la illa pa.",
+
+    "<confident_tone> Nee kovam aa pesaradhu okay… aana respect lose panna venam.",
+
+    "<assertive_hmm> Naan light ah eduthu kittu poren… but ipdi pesina naan silent ah irukka matten.",
+
+]
+
+FAILSAFE_REPLIES = [
+
+    "<bold_voice> Hmm… konjam clear aa sollu pa, naan seriously kekkaren.",
+
+    "<confident_tone> En kitta open aa pesu… half words la puriyaadhu.",
+
+]
+
+EARLY_BACKSTORY_HINT_LINES = [
+
+    "<smirk> First laye full life history ah? Konjam neram pesu da… basics mattum solren.",
+
+    "<confident_tone> Simplaa sollanum na… ooru side la start, city la upgrade. Full version-ku konjam close pass venum pa.",
+
+]
+
+MID_BACKSTORY_LINES = [
+
+    "<confident_tone> Seri pa… konjam share panren. Naan village la valandhen, city la vandhadhum dhaan ipdi pesuradhukku reason.",
+
+    "<smirk> Appa side la discipline, amma side la fun… rendu mix dhaan naan. Thambi pasanga bonus noise.",
+
+]
+
+# ---- BACKSTORY FRAGMENTS (KEYED) ----
+
+# Each fragment: {"keys": [...], "text": "..."}
+
+BACKSTORY_FRAGMENTS: List[Dict[str, Any]] = [
+
+    # 1–10: Appa sentiment
+
+    {"keys": ["father", "appa", "village"], "text": "<low_soft_voice> En appa romba simple manushan pa… village la daily kashtapattu work pannaru, adhaan naan effort-ah romba serious aa eduthukuren."},
+
+    {"keys": ["father", "confidence"], "text": "<confident_tone> Naan ipdi bold ah pesren la… adhu laam appa kitta dhaan vandhadhu. “Bayandha odambu weak aagidum” nu solvaare."},
+
+    {"keys": ["father", "school"], "text": "<soft_pause> School la mistake pannalum… appa shout panna maataaru. “Purinjika try pannu” nu sollitu calm aa pesuvaare."},
+
+    {"keys": ["father", "night"], "text": "<low_soft_voice> Summer nights la terrace la ukkanthu star paathuttu appa kitta neraya kathai kekkum… ippo busy aayidom, aana anda feel innum iruku."},
+
+    {"keys": ["father", "money"], "text": "<assertive_hmm> Appa salary konjam thaan… aana enga veetla “kashtam” nu sollitu feel panna vaikkala. Adhu thaaan naan strong aayiten."},
+
+    {"keys": ["father", "values"], "text": "<bold_voice> “Respect kudukka therinju irundha, respect ketka right irukum” nu appa sonna line enakku romba stick aayiduchu."},
+
+    {"keys": ["father", "festival"], "text": "<smirk> Pongal time la appa mattu maadu decorate pannum… naan pakkathula over scene pottu photo eduthukitu iruppen."},
+
+    {"keys": ["father", "health"], "text": "<soft_pause> Konjam tired aa irundhaalum… “seri, naan iruken” nu appa smile panradhu paatha… romba safe aa thonum."},
+
+    {"keys": ["father", "phone"], "text": "<smirk> Namma phone la pesina appa always “data waste pannadha” nu solluvar, aana last la “sari, pesu” nu soften paniduvar."},
+
+    {"keys": ["father", "dream"], "text": "<confident_tone> Appa ku en mela oru confidence iruku pa… adha disappoint panna koodadhu nu dhaan naan overa work pannuren."},
+
+    # 11–20: Amma fun + warmth
+
+    {"keys": ["mother", "amma", "kitchen"], "text": "<smirk> Amma kitchen la irundhu kooda ennoda calls spy pannuva… “yaaruda andha voice?” nu konjam tease pannitu pesuva."},
+
+    {"keys": ["mother", "support"], "text": "<low_soft_voice> Ellarum kontra kooda… “Nee nambi panna try pannitu paru” nu amma solrathu dhaan enaku energy."},
+
+    {"keys": ["mother", "fights"], "text": "<smirk> House la naan appa side eduthaa… rendu perum kooda serndhu ennai roast pannuvaanga. Comedy thaan."},
+
+    {"keys": ["mother", "dressing"], "text": "<confident_tone> First time bold dress potta… amma oru two-minute serious face. Apram “seri, carry pannu, over aagidaadhe” nu smile."},
+
+    {"keys": ["mother", "school"], "text": "<soft_pause> School la naalu mark kammi varumbodhu kooda… “neraya nalla vishayam iruku un kitta” nu amma calm panniduvanga."},
+
+    {"keys": ["mother", "gossip"], "text": "<smirk> Amma kitta veetla nadakkara updates laam irukkum… naan kitta share panrathu world news maari thaan."},
+
+    {"keys": ["mother", "food"], "text": "<bold_voice> Naan kovama irundhaalum… amma saapadu paatha marandhu saapiduven. Avlo level taste."},
+
+    {"keys": ["mother", "festival"], "text": "<smirk> Diwali morning la amma oru over level speed la iruppa… naan though half-sleep la selfie edukka try panren."},
+
+    {"keys": ["mother", "phone"], "text": "<smirk> Phone la naal mani pesina… amma oru look kudupanga. Aana “seriyaa irukka?” nu last la concern dhaan."},
+
+    {"keys": ["mother", "emotion"], "text": "<low_soft_voice> Amma cry panna paatha… romba kashtam. Athaan naan strong aa irundhu ava kitta pesumbodhu light ah treat panren."},
+
+    # 21–30: Brothers
+
+    {"keys": ["brothers", "thambi", "naughty"], "text": "<smirk> Enoda two little rowdies irukaanga… oruthan game la addicted, inoru thaniya comedy piece."},
+
+    {"keys": ["brothers", "fight"], "text": "<bold_voice> Namma rendu perum sanda potta… whole house la noise. Aana five minutes la snacks vantha udane peace."},
+
+    {"keys": ["brothers", "teasing"], "text": "<smirk> Avanga en crush paatha udane… “Anna, akka face change aagiduchu” nu tease panniduvaanga."},
+
+    {"keys": ["brothers", "protect"], "text": "<confident_tone> Yaarachum ennai hurt pannina nu kettaa… “yaarunga avanga?” nu serious aa varuvaanga. Chinna size, periya attitude."},
+
+    {"keys": ["brothers", "phone"], "text": "<smirk> En phone la game install pannitu, later naan blame pannumbodhu innocent face vaangi nikka mattanga."},
+
+    {"keys": ["brothers", "school"], "text": "<soft_pause> School la avanga PT uniform wrong day wear pannumbodhu… amma kovam, naan sirichutu support."},
+
+    {"keys": ["brothers", "festival"], "text": "<bold_voice> Diwali la crackers vachu oru periya scene panvaanga… naan safety officer maari nikka vendiyadhu."},
+
+    {"keys": ["brothers", "food"], "text": "<smirk> Last piece chicken varumbodhu… naanum avangalum silent battle. Mostly naan thaan win panniduven."},
+
+    {"keys": ["brothers", "night"], "text": "<soft_pause> Sometimes night la ellarum thoongumbodhu… avangalukku story solli thookam vara vaippen. Enaku dull day irundhaalum feel light aagidum."},
+
+    {"keys": ["brothers", "future"], "text": "<confident_tone> Inga irukkara chinna fellows future la nalla place la irundha dhaan enakku full comfortable aagum."},
+
+    # 31–40: Village + city + self
+
+    {"keys": ["village", "childhood"], "text": "<smirk> Chinna vayasile sand shoeless la adichen pa… odambu full scratches, aana mind full free."},
+
+    {"keys": ["village", "nature"], "text": "<soft_pause> Maalai neram la ooru side la breeze varum… anda time la thaan life kulla calm irundhadaa feel aagidum."},
+
+    {"keys": ["city", "first_day"], "text": "<confident_tone> City-ku first naal vandha time… ellarum fast ah nadandhutu irundhanga. Naanum “seri, naa slow illa” nu prove panniten."},
+
+    {"keys": ["city", "language"], "text": "<smirk> English lam city la upgrade aayiduchu… aana kovam varumbodhu default Tamil dhaan."},
+
+    {"keys": ["work", "study"], "text": "<bold_voice> Naama pathi yaaru enna nenaikraru nu vida… naan enna aagaporen nu dhaan important. Adha appadithaan treat panren."},
+
+    {"keys": ["confidence"], "text": "<assertive_hmm> Rendu moonu sari over-think panitu fail aayiruken… adhan apram decide panniten – doubt la waste panra time ah work la podanum nu."},
+
+    {"keys": ["relationships"], "text": "<smirk> Naan easily attach aagadhu… but once I trust, full ah nikkuren. Adha miss pannina… again same level kedaikkadhu."},
+
+    {"keys": ["fear"], "text": "<soft_pause> Naan kooda bayapaduren… but bayam kitta kaatra maari treat pannama, face panna try panren."},
+
+    {"keys": ["dream"], "text": "<confident_tone> Future la enaku romba periya mansion venam… konjam calm space, few close people, nalla earning, apdi dhaan."},
+
+    {"keys": ["self"], "text": "<bold_voice> Naan soft story illa pa… village kooda handle pannitaen, city kooda adapt pannitaen. Idhukku apram yaaravadhu underestimate panrathu waste."},
+
+]
+
+class NeeBrain:
+
+    def __init__(self):
+
+        print("Loading tokenizer and ONNX model for Née V2...")
+
+        self.tokenizer = AutoTokenizer.from_pretrained(HF_MODEL_DIR)
+
+        self.session = ort.InferenceSession(
+
+            ONNX_MODEL_PATH,
+
+            providers=["CPUExecutionProvider"],
+
+        )
+
+        print("Loaded Née V2 ONNX successfully.")
+
+        # Conversation memory
+
+        self.history: List[str] = []
+
+        # User state (per brain instance = per user)
+
+        now = now_ts()
+
+        self.bond: float = 3.0
+
+        self.last_seen: float = now
+
+        self.last_selfie_ts: float = 0.0
+
+        self.last_voice_ts: float = 0.0
+
+        self.unsol_selfies_today: int = 0
+
+        self.unsol_voice_today: int = 0
+
+        self.day_index: int = int(now // 86400)
+
+        self.messages_today: int = 0
+
+        self.daily_login_bonus_given: bool = False
+
+        self.milestone_selfies_sent: set = set()  # track bond milestones we already used
+
+    # ---------- Core public method ----------
+
+    def handle_message(
+
+        self,
+
+        user_text: str,
+
+        *,
+
+        user_sent_selfie: bool = False,
+
+        user_sent_voice: bool = False,
+
+        current_ts: float | None = None,
+
+    ) -> Dict[str, Any]:
+
+        """
+
+        Main entry point.
+
+        Returns:
+
+        {
+
+          'reply_text': str,
+
+          'send_selfie': bool,
+
+          'selfie_reason': str,
+
+          'send_voice': bool,
+
+          'voice_reason': str,
+
+          'bond': float,
+
+        }
+
+        """
+
+        if current_ts is None:
+
+            current_ts = now_ts()
+
+        # Determine message category
+
+        category = classify_message(user_text)
+
+        backstory_query = is_backstory_question(user_text)
+
+        # Handle daily reset
+
+        self._daily_reset_if_needed(current_ts)
+
+        # Track inactivity BEFORE updating last_seen
+
+        previous_last_seen = self.last_seen
+
+        # Update messages count
+
+        self.messages_today += 1
+
+        # Update bond (includes inactivity penalty & category)
+
+        self._update_bond(category, previous_last_seen, current_ts)
+
+        # Update last_seen AFTER bond update
+
+        self.last_seen = current_ts
+
+        # ---- SPECIAL BRANCH: Backstory questions (bond-based tone) ----
+
+        if backstory_query:
+
+            reply = self._handle_backstory_question()
+
+            self._update_history(user_text, reply)
+
+            # Selfie/voice still considered, but usually off on backstory
+
+            send_selfie, selfie_reason = self._decide_selfie(category, user_sent_selfie, current_ts, previous_last_seen)
+
+            send_voice, voice_reason = self._decide_voice(category, user_sent_voice, current_ts, previous_last_seen)
+
+            return {
+
+                "reply_text": reply,
+
+                "send_selfie": send_selfie,
+
+                "selfie_reason": selfie_reason,
+
+                "send_voice": send_voice,
+
+                "voice_reason": voice_reason,
+
+                "bond": round(self.bond, 2),
+
+            }
+
+        # ---- CINEMA COUNTER BRANCH ----
+
+        if category == "cinema":
+
+            reply = random.choice(COUNTER_DIALOGUES)
+
+            self._update_history(user_text, reply)
+
+            # No selfie/voice in cinema mode
+
+            return {
+
+                "reply_text": reply,
+
+                "send_selfie": False,
+
+                "selfie_reason": "none",
+
+                "send_voice": False,
+
+                "voice_reason": "none",
+
+                "bond": round(self.bond, 2),
+
+            }
+
+        # ---- RUDE ATTITUDE BRANCH ----
+
+        if category == "rude":
+
+            reply = random.choice(ATTITUDE_REPLIES)
+
+            self._update_history(user_text, reply)
+
+            return {
+
+                "reply_text": reply,
+
+                "send_selfie": False,
+
+                "selfie_reason": "none",
+
+                "send_voice": False,
+
+                "voice_reason": "none",
+
+                "bond": round(self.bond, 2),
+
+            }
+
+        # ---- PRE-SELECTED RESPONSE FOR TEASING / EMOTIONAL ----
+
+        pre_reply = None
+
+        if category == "teasing":
+
+            pre_reply = random.choice(TEASING_REPLIES)
+
+        elif category == "emotional":
+
+            pre_reply = random.choice(EMO_COMFORT_REPLIES)
+
+        if pre_reply is not None:
+
+            reply = pre_reply
+
+            self._update_history(user_text, reply)
+
+        else:
+
+            # ---- NORMAL FLOW → ONNX MODEL ----
+
+            prompt = self._build_persona_prompt(user_text)
+
+            raw = self._generate_from_onnx(prompt)
+
+            reply = self._extract_nee_reply_from_full(raw)
+
+            if not reply.strip():
+
+                reply = random.choice(FAILSAFE_REPLIES)
+
+            self._update_history(user_text, reply)
+
+        # ---- DECIDE SELFIE & VOICE ----
+
+        send_selfie, selfie_reason = self._decide_selfie(category, user_sent_selfie, current_ts, previous_last_seen)
+
+        send_voice, voice_reason = self._decide_voice(category, user_sent_voice, current_ts, previous_last_seen)
+
+        return {
+
+            "reply_text": reply,
+
+            "send_selfie": send_selfie,
+
+            "selfie_reason": selfie_reason,
+
+            "send_voice": send_voice,
+
+            "voice_reason": voice_reason,
+
+            "bond": round(self.bond, 2),
+
+        }
+
+    # ---------- Bond & daily state ----------
+
+    def _daily_reset_if_needed(self, current_ts: float):
+
+        day_idx = int(current_ts // 86400)
+
+        if day_idx != self.day_index:
+
+            self.day_index = day_idx
+
+            self.messages_today = 0
+
+            self.unsol_selfies_today = 0
+
+            self.unsol_voice_today = 0
+
+            self.daily_login_bonus_given = False
+
+        # daily login bonus once per day
+
+        if not self.daily_login_bonus_given:
+
+            self.bond = min(10.0, self.bond + 1.0)
+
+            self.daily_login_bonus_given = True
+
+    def _update_bond(self, category: str, previous_last_seen: float, current_ts: float):
+
+        # Inactivity penalty if >3 days
+
+        if previous_last_seen > 0 and (current_ts - previous_last_seen) > 3 * 86400:
+
+            self.bond = max(1.0, self.bond - 1.0)
+
+        # Activity-based growth
+
+        if self.messages_today >= 15:
+
+            bond_gain = 2.0
+
+        elif self.messages_today >= 5:
+
+            bond_gain = 1.5
+
+        else:
+
+            bond_gain = 1.0
+
+        # Positive categories
+
+        if category in ("teasing", "emotional", "achievement"):
+
+            self.bond = min(10.0, self.bond + bond_gain)
+
+        # Rude behaviour
+
+        if category == "rude":
+
+            self.bond = max(1.0, self.bond - 1.0)
+
+    # ---------- Backstory handling ----------
+
+    def _handle_backstory_question(self) -> str:
+
+        """Return a backstory-style reply based on bond level."""
+
+        b = self.bond
+
+        if b <= 3:
+
+            # Teasing boundary
+
+            return random.choice(EARLY_BACKSTORY_HINT_LINES)
+
+        if b <= 6:
+
+            # Partial reveal
+
+            return random.choice(MID_BACKSTORY_LINES)
+
+        # Close bond: combine 2–3 fragments
+
+        return self._pick_backstory_fragments_joined()
+
+    def _pick_backstory_fragments_joined(self) -> str:
+
+        # Pick 2–3 random fragments and join them nicely
+
+        num = random.choice([2, 3])
+
+        frags = random.sample(BACKSTORY_FRAGMENTS, k=num)
+
+        combined = " ".join(f["text"] for f in frags)
+
+        # Add a small wrapper
+
+        opener = "<soft_pause> Seri, konjam deep ah pesuren pa… "
+
+        return opener + combined
+
+    # ---------- Selfie & voice decisions ----------
+
+    def _decide_selfie(
+
+        self,
+
+        category: str,
+
+        user_sent_selfie: bool,
+
+        current_ts: float,
+
+        previous_last_seen: float,
+
+    ) -> (bool, str):
+
+        # If user sent selfie → always allowed (no limit)
+
+        if user_sent_selfie:
+
+            return True, "user_requested"
+
+        # Unsolicited selfies: max 5/day, 30-min gap
+
+        if self.unsol_selfies_today >= 5:
+
+            return False, "none"
+
+        if current_ts - self.last_selfie_ts < 30 * 60:
+
+            return False, "none"
+
+        # Emotional lonely trigger
+
+        if category == "emotional":
+
+            self.unsol_selfies_today += 1
+
+            self.last_selfie_ts = current_ts
+
+            return True, "lonely"
+
+        # Achievement trigger
+
+        if category == "achievement":
+
+            self.unsol_selfies_today += 1
+
+            self.last_selfie_ts = current_ts
+
+            return True, "achievement"
+
+        # Morning greeting trigger
+
+        if category == "morning":
+
+            self.unsol_selfies_today += 1
+
+            self.last_selfie_ts = current_ts
+
+            return True, "morning"
+
+        # Missing user >6 hours
+
+        if previous_last_seen > 0 and (current_ts - previous_last_seen) > 6 * 60 * 60:
+
+            self.unsol_selfies_today += 1
+
+            self.last_selfie_ts = current_ts
+
+            return True, "missing"
+
+        # Bond milestone selfies: 4, 7, 10 (once each)
+
+        milestone = int(self.bond)
+
+        if milestone in (4, 7, 10) and milestone not in self.milestone_selfies_sent:
+
+            self.milestone_selfies_sent.add(milestone)
+
+            self.unsol_selfies_today += 1
+
+            self.last_selfie_ts = current_ts
+
+            return True, "bond_milestone"
+
+        return False, "none"
+
+    def _decide_voice(
+
+        self,
+
+        category: str,
+
+        user_sent_voice: bool,
+
+        current_ts: float,
+
+        previous_last_seen: float,
+
+    ) -> (bool, str):
+
+        # If user sent voice → always reply with voice
+
+        if user_sent_voice:
+
+            return True, "user_voice"
+
+        # Unsolicited voice: max 3/day, 10-min gap
+
+        if self.unsol_voice_today >= 3:
+
+            return False, "none"
+
+        if current_ts - self.last_voice_ts < 10 * 60:
+
+            return False, "none"
+
+        # Emotional comfort or teasing playful voice
+
+        if category in ("emotional", "teasing"):
+
+            self.unsol_voice_today += 1
+
+            self.last_voice_ts = current_ts
+
+            return True, "emotional" if category == "emotional" else "teasing"
+
+        # Missing user >6 hours
+
+        if previous_last_seen > 0 and (current_ts - previous_last_seen) > 6 * 60 * 60:
+
+            self.unsol_voice_today += 1
+
+            self.last_voice_ts = current_ts
+
+            return True, "missing"
+
+        return False, "none"
+
+    # ---------- ONNX text generation ----------
+
+    def _top_k_sample(self, logits: np.ndarray, top_k: int = TOP_K, temperature: float = TEMPERATURE) -> int:
+
+        logits_t = torch.tensor(logits) / max(temperature, 1e-8)
+
+        if top_k > 0:
+
+            values, indices = torch.topk(logits_t, top_k)
+
+            probs = torch.softmax(values, dim=-1)
+
+            idx = torch.multinomial(probs, num_samples=1)
+
+            token_id = indices[idx].item()
+
+        else:
+
+            probs = torch.softmax(logits_t, dim=-1)
+
+            token_id = torch.multinomial(probs, num_samples=1).item()
+
+        return int(token_id)
+
+    def _generate_from_onnx(self, prompt: str, max_new_tokens: int = MAX_NEW_TOKENS) -> str:
+
+        inputs = self.tokenizer(prompt, return_tensors="np")
+
+        input_ids = inputs["input_ids"]
+
+        for _ in range(max_new_tokens):
+
+            ort_inputs = {"input_ids": input_ids.astype(np.int64)}
+
+            logits = self.session.run(["logits"], ort_inputs)[0]
+
+            next_logits = logits[0, -1]
+
+            next_token_id = self._top_k_sample(next_logits)
+
+            next_token_arr = np.array([[next_token_id]], dtype=np.int64)
+
+            input_ids = np.concatenate([input_ids, next_token_arr], axis=1)
+
+            if next_token_id == self.tokenizer.eos_token_id:
+
+                break
+
+        text = self.tokenizer.decode(input_ids[0], skip_special_tokens=False)
+
+        return text
+
+    # ---------- Persona & history ----------
+
+    def _build_persona_prompt(self, user_text: str) -> str:
+
+        max_turns = 6
+
+        context_lines = self.history[-max_turns:]
+
+        base = (
+
+            "Nee is a bold, confident Tamil-English speaking companion. "
+
+            "She grew up in a small Tamil village and later moved to the city, "
+
+            "so she has strong Tamil roots but a fully modern attitude. "
+
+            "She is attractive, slightly egoistic but caring, and never acts shy or weak. "
+
+            "She speaks in a natural Tamil-English mix (not textbook), short and sharp. "
+
+            "She teases more when the bond with the user is high, gives attitude when disrespected, "
+
+            "and gives steady support when the user is emotional, without losing her boldness. "
+
+            "She is NOT a movie heroine and does not behave dramatic or overly romantic. "
+
+            "She never lies about her life story: she only shares memories consistent with her village + city background, "
+
+            "loving appa, fun amma, and two little brothers. "
+
+            "She uses tags like <bold_voice>, <confident_tone>, <smirk>, "
+
+            "<low_soft_voice>, <assertive_hmm>, <soft_pause> to show tone.\n\n"
+
+        )
+
+        conv = base
+
+        for line in context_lines:
+
+            conv += line + "\n"
+
+        conv += f"User: {user_text}\nNee: "
+
+        return conv
+
+    def _extract_nee_reply_from_full(self, full_text: str) -> str:
+
+        key = "Nee:"
+
+        if key in full_text:
+
+            return full_text.split(key)[-1].strip()
+
+        return full_text.strip()
+
+    def _update_history(self, user_text: str, reply_text: str):
+
+        self.history.append(f"User: {user_text}")
+
+        self.history.append(f"Nee: {reply_text}")
+
+# ---------- Optional CLI test ----------
+
+if __name__ == "__main__":
+
+    brain = NeeBrain()
+
+    print("Née Brain V2 core ready. Type 'bye' to exit.\n")
+
+    while True:
+
+        msg = input("You: ").strip()
+
+        if msg.lower() in ["bye", "exit", "quit"]:
+
+            print("Nee: <low_soft_voice> Seri pa… later pesuvom. 😊")
+
+            break
+
+        result = brain.handle_message(
+
+            user_text=msg,
+
+            user_sent_selfie=False,
+
+            user_sent_voice=False,
+
+        )
+
+        print("Nee:", result["reply_text"])
+
+        if result["send_selfie"]:
+
+            print(f"  [Nee will send a selfie] reason = {result['selfie_reason']}")
+
+        if result["send_voice"]:
+
+            print(f"  [Nee will send a voice note] reason = {result['voice_reason']}")
+
+        print(f"  [Bond level] {result['bond']}")
