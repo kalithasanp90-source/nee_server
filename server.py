@@ -90,6 +90,15 @@ def get_brain_for_user(user_id: str) -> NeeBrain:
 
     return brains[user_id]
 
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(Exception)
+async def debug_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=500,
+        content={"debug_error": str(exc)}
+    )
+
 @app.post("/chat", response_model=ChatResponse)
 
 def chat(req: ChatRequest):
