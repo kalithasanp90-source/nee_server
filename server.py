@@ -1,40 +1,29 @@
-import os, traceback
 from fastapi import FastAPI
 from pydantic import BaseModel
-from fastapi.responses import JSONResponse
-import onnxruntime as ort
-from transformers import AutoTokenizer
 
 app = FastAPI()
 
-TOKENIZER_DIR = os.path.join(os.getcwd(), "Nee_V2")
-MODEL_PATH = os.path.join(os.getcwd(), "Nee_V2_ONNX", "model.onnx")
+class ChatRequest(BaseModel):
+    user_id: str
+    message: str
+    user_sent_selfie: bool = False
+    user_sent_voice: bool = False
 
 @app.get("/")
 def root():
     return {
-        "tokenizer_files": os.listdir(TOKENIZER_DIR),
-        "model_exists": os.path.exists(MODEL_PATH),
-        "model_size": os.path.getsize(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
+        "status": "ok",
+        "message": "Nee Brain V2 server running"
     }
 
-class ChatReq(BaseModel):
-    user_id: str
-    message: str
-
 @app.post("/chat")
-def chat(req: ChatReq):
-    tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_DIR, trust_remote_code=False)
-    session = ort.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
-
-    # TEMP: echo only until full pipeline ready
-    return {"reply": f"Née heard: {req.message}"}    except Exception as e:
-        raise e
-
-    # load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_DIR, trust_remote_code=False)
-    # load onnx session
-    session = ort.InferenceSession(ONNX_PATH, providers=["CPUExecutionProvider"])
+def chat(req: ChatRequest):
+    try:
+        # Temporary response until model is connected
+        reply_text = f"Née heard you say: {req.message}"
+        return {"reply": reply_text}
+    except Exception as e:
+        return {"error": str(e)}    session = ort.InferenceSession(ONNX_PATH, providers=["CPUExecutionProvider"])
 
     # For safety: simple echo (replace with your real inference pipeline)
     return {"reply": f"Née (demo): I heard '{r.message}'", "user_id": r.user_id}LOADED = False
