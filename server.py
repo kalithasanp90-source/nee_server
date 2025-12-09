@@ -36,6 +36,10 @@ TOKENIZER = None
 SESSION = None
 LOADED = False
 
+import os
+
+print("Tokenizer file size:", os.path.getsize("Nee_V2/tokenizer.json"))
+
 def load_resources():
     global MODEL, TOKENIZER, LOADED
     if LOADED:
