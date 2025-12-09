@@ -6,9 +6,12 @@ services:
     plan: free
 
     buildCommand: |
-      python download_tokenizer.py && pip install -r requirements.txt
+      pip install -r requirements.txt
+      mkdir -p Nee_V2
+      gdown --fuzzy "https://drive.google.com/file/d/12F5s4htEf4OGSa4CoCG3r1m5H9jSlPGG/view?usp=sharing" -O Nee_V2/model.onnx
+      gdown --fuzzy "https://drive.google.com/file/d/1HYwzmKIMoK0Zjyjk-Y847lEYLyl4wjea/view?usp=sharing" -O Nee_V2/tokenizer.json
 
-    startCommand: "uvicorn server:app --host 0.0.0.0 --port $PORT"
+    startCommand: "uvicorn server:app --host 0.0.0.0 --port 10000"
 
     envVars:
       - key: PORT
