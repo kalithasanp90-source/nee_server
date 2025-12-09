@@ -6,10 +6,11 @@ services:
     plan: free
 
     buildCommand: |
-      pip install -r requirements.txt
+      pip install gdown -q
       mkdir -p Nee_V2
-      gdown --fuzzy "https://drive.google.com/file/d/12F5s4htEf4OGSa4CoCG3r1m5H9jSlPGG/view?usp=sharing" -O Nee_V2/model.onnx
-      gdown --fuzzy "https://drive.google.com/file/d/1HYwzmKIMoK0Zjyjk-Y847lEYLyl4wjea/view?usp=sharing" -O Nee_V2/tokenizer.json
+      gdown --fuzzy "https://drive.google.com/file/d/12F5s4htEf4OGSa4CoCG3r1m5H9jSlPGG/view" -O Nee_V2/model.onnx
+      gdown --fuzzy "https://drive.google.com/file/d/1HYwzmKIMoK0Zjyjk-Y847lEYLyl4wjea/view" -O Nee_V2/tokenizer.json
+      pip install -r requirements.txt
 
     startCommand: "uvicorn server:app --host 0.0.0.0 --port 10000"
 
