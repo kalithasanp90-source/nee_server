@@ -1,138 +1,65 @@
-# ============================================
-
-# Née Brain V2 - FastAPI Server
-
-# --------------------------------------------
-
-# Endpoint:
-
-#   POST /chat
-
-# Request JSON:
-
-#   {
-
-#     "user_id": "abc123",
-
-#     "message": "Hi Nee",
-
-#     "user_sent_selfie": false,
-
-#     "user_sent_voice": false
-
-#   }
-
-# Response JSON:
-
-#   {
-
-#     "reply": "...",
-
-#     "send_selfie": true/false,
-
-#     "selfie_reason": "...",
-
-#     "send_voice": true/false,
-
-#     "voice_reason": "...",
-
-#     "bond": 5.5
-
-#   }
-
-# ============================================
-
 from fastapi import FastAPI
-
 from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+import os
+import traceback
 
-from typing import Dict
+app = FastAPI()
 
-from nee_core import NeeBrain  # make sure nee_core.py is in same folder
+# --- Simple debug exception handler so we see runtime error messages directly ---
+@app.exception_handler(Exception)
+async def debug_exception_handler(request, exc):
+    return JSONResponse(status_code=500, content={"debug_error": str(exc), "trace": traceback.format_exc()})
 
-app = FastAPI(title="Nee Brain V2 Server")
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "Nee Brain V2 server running"}
 
-# Simple per-user brain store (in-memory)
-
-brains: Dict[str, NeeBrain] = {}
-
+# Chat request model — match your nee_core.py usage
 class ChatRequest(BaseModel):
-
     user_id: str
-
     message: str
-
     user_sent_selfie: bool = False
-
     user_sent_voice: bool = False
 
 class ChatResponse(BaseModel):
-
     reply: str
+    send_selfie: bool = False
+    selfie_reason: str = "none"
+    send_voice: bool = False
+    voice_reason: str = "none"
+    bond: float = 0.0
 
-    send_selfie: bool
+# Lazy-load model/tokenizer when first chat arrives (saves startup time)
+MODEL = None
+TOKENIZER = None
+SESSION = None
+LOADED = False
 
-    selfie_reason: str
-
-    send_voice: bool
-
-    voice_reason: str
-
-    bond: float
-
-def get_brain_for_user(user_id: str) -> NeeBrain:
-
-    """Create or reuse a NeeBrain instance per user_id."""
-
-    if user_id not in brains:
-
-        brains[user_id] = NeeBrain()
-
-    return brains[user_id]
-
-from fastapi.responses import JSONResponse
-
-@app.exception_handler(Exception)
-async def debug_exception_handler(request, exc):
-    return JSONResponse(
-        status_code=500,
-        content={"debug_error": str(exc)}
-    )
+def load_resources():
+    global MODEL, TOKENIZER, LOADED
+    if LOADED:
+        return
+    # load tokenizer from Nee_V2 folder and ONNX from Nee_V2_ONNX/model.onnx
+    from transformers import AutoTokenizer
+    import onnxruntime as ort
+    tok_dir = os.path.join(os.getcwd(), "Nee_V2")
+    onnx_path = os.path.join(os.getcwd(), "Nee_V2_ONNX", "model.onnx")
+    TOKENIZER = AutoTokenizer.from_pretrained(tok_dir, trust_remote_code=False)
+    # Create ONNX session
+    SESSION = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
+    LOADED = True
+    globals().update({"TOKENIZER": TOKENIZER, "SESSION": SESSION})
 
 @app.post("/chat", response_model=ChatResponse)
-
-def chat(req: ChatRequest):
-
-    brain = get_brain_for_user(req.user_id)
-
-    result = brain.handle_message(
-
-        user_text=req.message,
-
-        user_sent_selfie=req.user_sent_selfie,
-
-        user_sent_voice=req.user_sent_voice,
-
-    )
-
-    return ChatResponse(
-
-        reply=result["reply_text"],
-
-        send_selfie=result["send_selfie"],
-
-        selfie_reason=result["selfie_reason"],
-
-        send_voice=result["send_voice"],
-
-        voice_reason=result["voice_reason"],
-
-        bond=result["bond"],
-
-    )
-
-@app.get("/")
-
-def root():
-
-    return {"status": "ok", "message": "Nee Brain V2 server running"}
+async def chat(req: ChatRequest):
+    try:
+        load_resources()
+        # Simple echo-style response using tokenizer for demo.
+        # Replace this block with your nee_core inference pipeline using SESSION and TOKENIZER.
+        user_msg = req.message
+        # placeholder reply logic (replace with model inference)
+        reply = f"Née (demo): I heard '{user_msg}' — I will be bold and teasing!"
+        return ChatResponse(reply=reply, send_selfie=False, selfie_reason="none", send_voice=False, voice_reason="none", bond=4.0)
+    except Exception as e:
+        raise e
