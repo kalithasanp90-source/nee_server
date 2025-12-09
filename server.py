@@ -2,39 +2,33 @@ import os, traceback
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
+import onnxruntime as ort
+from transformers import AutoTokenizer
 
 app = FastAPI()
 
 TOKENIZER_DIR = os.path.join(os.getcwd(), "Nee_V2")
-ONNX_PATH = os.path.join(os.getcwd(), "Nee_V2_ONNX", "model.onnx")
-
-@app.exception_handler(Exception)
-async def debug_exception_handler(request, exc):
-    return JSONResponse(status_code=500, content={"error": str(exc), "trace": traceback.format_exc()})
+MODEL_PATH = os.path.join(os.getcwd(), "Nee_V2_ONNX", "model.onnx")
 
 @app.get("/")
 def root():
-    info = {
-        "tokenizer_exists": os.path.exists(os.path.join(TOKENIZER_DIR, "tokenizer.json")),
-        "tokenizer_files": os.listdir(TOKENIZER_DIR) if os.path.exists(TOKENIZER_DIR) else [],
-        "onnx_exists": os.path.exists(ONNX_PATH),
-        "onnx_size": os.path.getsize(ONNX_PATH) if os.path.exists(ONNX_PATH) else None
+    return {
+        "tokenizer_files": os.listdir(TOKENIZER_DIR),
+        "model_exists": os.path.exists(MODEL_PATH),
+        "model_size": os.path.getsize(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
     }
-    return info
 
 class ChatReq(BaseModel):
     user_id: str
     message: str
-    user_sent_selfie: bool = False
-    user_sent_voice: bool = False
 
 @app.post("/chat")
-async def chat(r: ChatReq):
-    # Lazy-load tokenizer & ONNX when first used to save startup time
-    try:
-        from transformers import AutoTokenizer
-        import onnxruntime as ort
-    except Exception as e:
+def chat(req: ChatReq):
+    tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_DIR, trust_remote_code=False)
+    session = ort.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
+
+    # TEMP: echo only until full pipeline ready
+    return {"reply": f"Née heard: {req.message}"}    except Exception as e:
         raise e
 
     # load tokenizer
