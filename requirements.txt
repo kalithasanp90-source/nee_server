@@ -1,7 +1,4 @@
 fastapi
-uvicorn[standard]
-onnxruntime
+uvicorn
 transformers
-tokenizers
-requests
-gdown
+onnxruntime
