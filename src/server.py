@@ -1,35 +1,28 @@
 from fastapi import FastAPI
-from pydantic import BaseModel
-from nee_core import NeeBrain
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+from nee_core import NeeBrain
 
 app = FastAPI()
 
-brain = NeeBrain()
+# CORS (allow Unity, web, mobile)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-
-class ChatRequest(BaseModel):
-    message: str
-
-
-class ChatResponse(BaseModel):
-    reply: str
-
-
-@app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest):
-
-        result = brain.handle_message(req.message)
-
-        return ChatResponse(
-            reply=result["reply_text"]
-        )
-
+# Load AI
+nee = NeeBrain()
 
 @app.get("/")
 def home():
-    return {"status": "Née test server running"}
+    return {"status": "Née Server Running"}
 
-
-if __name__ == "__main__":
-    uvicorn.run("server:app", host="0.0.0.0", port=8000)
+@app.post("/chat")
+async def chat_api(data: dict):
+    msg = data.get("message", "")
+    reply = nee.chat(msg)
+    return {"reply": reply}
