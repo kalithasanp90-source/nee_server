@@ -42,7 +42,7 @@ from transformers import AutoTokenizer
 
 HF_MODEL_DIR = "./Nee_V2"                     # folder where tokenizer/config are saved
 
-ONNX_MODEL_PATH = "./Nee_V2_ONNX/model.onnx"  # ONNX model path
+ONNX_MODEL_PATH = "./model.onnx"  # ONNX model path
 
 MAX_NEW_TOKENS = 60
 
