@@ -32,8 +32,6 @@ from typing import List, Dict, Any
 
 import numpy as np
 
-import torch
-
 import onnxruntime as ort
 
 from transformers import AutoTokenizer
@@ -49,6 +47,20 @@ MAX_NEW_TOKENS = 60
 TEMPERATURE = 0.8
 
 TOP_K = 40
+
+def _top_k_sample(self, logits: np.ndarray, top_k: int = TOP_K, temperature: float = TEMPERATURE) -> int:
+    logits_t = torch.tensor(logits) / max(temperature, 1e-8)
+
+    if top_k > 0:
+        values, indices = torch.topk(logits_t, top_k)
+        probs = torch.softmax(values, dim=-1)
+        idx = torch.multinomial(probs, num_samples=1)
+        token_id = indices[idx].item()
+    else:
+        probs = torch.softmax(logits_t, dim=-1)
+        token_id = torch.multinomial(probs, num_samples=1).item()
+
+    return int(token_id)
 
 # ---- HELPER: TIME ----
 
