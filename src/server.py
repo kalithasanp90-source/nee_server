@@ -1,11 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
-from nee_core import NeeBrain
+from nee_core import NeeBrain  # nee_core.py is in the same src folder
 
 app = FastAPI()
 
-# CORS (allow Unity, web, mobile)
+# Allow any origin (for now)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,15 +13,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load AI
-nee = NeeBrain()
+# Single global brain
+brain = NeeBrain()
 
 @app.get("/")
-def home():
-    return {"status": "Née Server Running"}
+async def root():
+    return {"status": "ok", "message": "Nee server running"}
 
 @app.post("/chat")
-async def chat_api(data: dict):
-    msg = data.get("message", "")
-    reply = nee.chat(msg)
-    return {"reply": reply}
+async def chat(body: dict):
+    text = body.get("message", "")
+    result = brain.handle_message(text)
+    # Just return reply_text for now
+    return {"reply": result["reply_text"]}
