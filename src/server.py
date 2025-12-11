@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from nee_core import NeeBrain  # nee_core.py is in the same src folder
+from .nee_core import NeeBrain  # nee_core.py is in the same src folder
 
 app = FastAPI()
 
