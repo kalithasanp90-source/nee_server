@@ -1,56 +1,94 @@
 import os
+import json
 import onnxruntime as ort
-from transformers import AutoTokenizer
 
-# -----------------------------
+
+# ------------------------------------------
 # PATH SETUP
-# -----------------------------
-BASE_DIR = os.path.dirname(__file__)    # /opt/render/project/src/
+# ------------------------------------------
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 MODEL_PATH = os.path.join(BASE_DIR, "model.onnx")
-TOKENIZER_PATH = os.path.join(BASE_DIR, "Nee_V2")
+TOKEN_DIR = os.path.join(BASE_DIR, "Nee_V2")
 
-print("MODEL PATH:", MODEL_PATH)
-print("TOKENIZER PATH:", TOKENIZER_PATH)
+VOCAB_PATH = os.path.join(TOKEN_DIR, "vocab.json")
+TOKENIZER_JSON = os.path.join(TOKEN_DIR, "tokenizer.json")
+SPECIAL_TOKENS = os.path.join(TOKEN_DIR, "special_tokens_map.json")
+TOKENIZER_CONFIG = os.path.join(TOKEN_DIR, "tokenizer_config.json")
+MERGES_PATH = os.path.join(TOKEN_DIR, "merges.txt")
 
-# -----------------------------
-# LOAD MODEL + TOKENIZER
-# -----------------------------
-class NeeBrain:
+
+# ------------------------------------------
+# LOAD TOKENIZER FILES
+# ------------------------------------------
+
+def load_json(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+class SimpleTokenizer:
     def __init__(self):
-        # Load tokenizer from Nee_V2 folder
-        print("Loading tokenizer...")
-        self.tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
 
-        # ONNX Runtime options
-        session_options = ort.SessionOptions()
-        session_options.intra_op_num_threads = 1
+        self.vocab = load_json(VOCAB_PATH)
+        self.tokenizer_json = load_json(TOKENIZER_JSON)
 
-        print("Loading ONNX model...")
-        self.session = ort.InferenceSession(
-            MODEL_PATH,
-            sess_options=session_options,
-            providers=["CPUExecutionProvider"]
-        )
+        # Basic reverse vocab for decoding
+        self.id_to_token = {v: k for k, v in self.vocab.items()}
 
-    # -----------------------------
-    # MAIN CHAT FUNCTION
-    # -----------------------------
-    def chat(self, message: str) -> str:
-        # Tokenize input
-        inputs = self.tokenizer(
-            message,
-            return_tensors="np",
-            padding=True,
-            truncation=True
-        )
+    def encode(self, text):
+        # Super-simple tokenization (placeholder)
+        tokens = text.strip().split()
+        ids = [self.vocab.get(t, self.vocab.get("<unk>", 0)) for t in tokens]
+        return ids
+
+    def decode(self, ids):
+        tokens = [self.id_to_token.get(i, "<unk>") for i in ids]
+        return " ".join(tokens)
+
+
+# ------------------------------------------
+# LOAD ONNX MODEL
+# ------------------------------------------
+
+class NeeBrain:
+
+    def __init__(self):
+        print("🔄 Loading ONNX model...")
+
+        if not os.path.exists(MODEL_PATH):
+            raise FileNotFoundError(f"Model not found at: {MODEL_PATH}")
+
+        self.session = ort.InferenceSession(MODEL_PATH)
+
+        print("✅ Model loaded!")
+
+        # Load tokenizer
+        self.tokenizer = SimpleTokenizer()
+        print("✅ Tokenizer loaded!")
+
+    # ------------------------------------------------
+    # Simple test function for checking if server works
+    # ------------------------------------------------
+    def think(self, text):
+        """
+        Basic inference pipeline – replace later with real logic.
+        """
+
+        # Encode input
+        ids = self.tokenizer.encode(text)
+
+        # ONNX expects input name
+        input_name = self.session.get_inputs()[0].name
 
         # Run inference
-        ort_inputs = {self.session.get_inputs()[0].name: inputs["input_ids"]}
-        outputs = self.session.run(None, ort_inputs)
+        output = self.session.run(None, {input_name: [ids]})
 
-        # Decode (dummy for now)
-        # Replace with your model's output mapping later
-        reply_ids = outputs[0][0]
-        reply_text = self.tokenizer.decode(reply_ids, skip_special_tokens=True)
-
-        return reply_text
+        # Return dummy + output length
+        return {
+            "input": text,
+            "encoded": ids,
+            "output_length": len(output[0][0]),
+            "message": "Inference success (dummy output)."
+        }
